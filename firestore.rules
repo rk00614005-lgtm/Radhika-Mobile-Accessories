@@ -1,0 +1,169 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // GLOBAL REUSABLE PRIMITIVES & HELPERS
+    // ==========================================
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Role verification: check /admins collection or verified runtime owner email
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == 'rk00614005@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // ENTITY VALIDATION BLUEPRINTS
+    // ==========================================
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.price is number && data.price >= 0 &&
+             data.categoryId is string && data.categoryId.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 5000)) &&
+             (!('brand' in data) || (data.brand is string && data.brand.size() <= 100)) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000));
+    }
+
+    function isValidCategory(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500));
+    }
+
+    function isValidOrder(data) {
+      return data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 50 &&
+             data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 150 &&
+             data.customerPhone is string && data.customerPhone.size() > 0 && data.customerPhone.size() <= 25 &&
+             data.items is list && data.items.size() > 0 && data.items.size() <= 100 &&
+             data.total is number && data.total >= 0;
+    }
+
+    function isValidCoupon(data) {
+      return data.code is string && data.code.size() > 0 && data.code.size() <= 30 &&
+             data.discountType is string && data.discountType.size() <= 20 &&
+             data.discountValue is number && data.discountValue > 0;
+    }
+
+    function isValidReview(data) {
+      return data.productId is string && data.productId.size() <= 100 &&
+             data.userName is string && data.userName.size() > 0 && data.userName.size() <= 100 &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() > 0 && data.comment.size() <= 2000;
+    }
+
+    function isValidGallery(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 150 &&
+             data.imageUrl is string && data.imageUrl.size() > 0 && data.imageUrl.size() <= 1000;
+    }
+
+    function isValidContact(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
+             data.message is string && data.message.size() > 0 && data.message.size() <= 4000;
+    }
+
+    // ==========================================
+    // RESOURCE RULE MATCH BLOCKS
+    // ==========================================
+
+    // Products: Public catalogue browsing, strict admin writes
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
+      allow update: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
+      allow delete: if isValidId(productId) && isAdmin();
+    }
+
+    // Categories: Public viewing, admin writes
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming());
+      allow update: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    // Orders: Customer creation & self-read, guest confirmation, Admin full read & status management
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (
+        isAdmin() ||
+        (!('userId' in resource.data)) ||
+        (isSignedIn() && resource.data.userId == request.auth.uid)
+      );
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(orderId) && isValidOrder(incoming());
+      allow update: if isValidId(orderId) && isAdmin();
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    // Coupons: Public viewing to check discount validity, admin write
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow create: if isValidId(couponId) && isAdmin() && isValidCoupon(incoming());
+      allow update: if isValidId(couponId) && isAdmin() && isValidCoupon(incoming());
+      allow delete: if isValidId(couponId) && isAdmin();
+    }
+
+    // Reviews: Public viewing, user posting, admin moderation
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isValidId(reviewId) && isValidReview(incoming());
+      allow update: if isValidId(reviewId) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+      allow delete: if isValidId(reviewId) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+    }
+
+    // Gallery: Public viewing, admin writes
+    match /gallery/{galleryId} {
+      allow read: if true;
+      allow create: if isValidId(galleryId) && isAdmin() && isValidGallery(incoming());
+      allow update: if isValidId(galleryId) && isAdmin() && isValidGallery(incoming());
+      allow delete: if isValidId(galleryId) && isAdmin();
+    }
+
+    // Contact Inquiries: Anyone can submit message, only admin can view or delete
+    match /contact_messages/{messageId} {
+      allow create: if isValidId(messageId) && isValidContact(incoming());
+      allow read: if isValidId(messageId) && isAdmin();
+      allow update, delete: if isValidId(messageId) && isAdmin();
+    }
+
+    // Admins registry: Only readable by admins, writes disabled from client
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // User Profiles: Private self-read/update, admin read
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isSignedIn() && request.auth.uid == userId));
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isSignedIn() && request.auth.uid == userId;
+      allow update: if isValidId(userId) && isSignedIn() && request.auth.uid == userId && (
+        !('role' in incoming()) || incoming().role != 'ADMIN' || isAdmin()
+      );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+  }
+}

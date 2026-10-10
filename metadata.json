@@ -1,0 +1,6 @@
+{
+  "name": "Radhika Mobile Accessories",
+  "description": "Premium online store for smartphone accessories, tempered glass, fast chargers, cables, audio gadgets & smart wearables with express delivery across India.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
